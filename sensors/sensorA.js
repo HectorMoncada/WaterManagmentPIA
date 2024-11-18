@@ -24,7 +24,7 @@ async function push() {
             },
         }).catch((err) => {
             console.log(err.message);
-            console.log(err.responde.data);
+            console.log(err.response.data);
         });
 
         console.log('This printed after about 5 seconds');

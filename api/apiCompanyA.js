@@ -7,8 +7,7 @@ require('dotenv').config();
 const API_URL = process.env.ALCHEMY_AMOY_API_KEY_HTTPS;
 const PUBLIC_KEY = process.env.PUBLIC_KEY_COMPANY_A;
 const PRIVATE_KEY = process.env.PRIVATE_KEY_COMPANY_A;
-const WATER_MANAGEMENT_CONTRACT_ADDRESS = 
-    process.env.WATER_MANAGEMENT_CONTRACT_ADDRESS;
+const WATER_MANAGEMENT_CONTRACT_ADDRESS = process.env.WATER_MANAGEMENT_CONTRACT_ADDRESS;
 const WATER_MANAGEMENT_ABI = JSON.parse(process.env.WATER_MANAGEMENT_ABI);
 
 const web3 = createAlchemyWeb3(API_URL);
@@ -16,12 +15,16 @@ const app = express();
 app.use(bodyParser.json());
 app.use(cors());
 
-app.post('/sensor' , async (req, res) => {
+// Convertir la dirección pública a su formato de checksum
+const checksumAddress = web3.utils.toChecksumAddress(PUBLIC_KEY);
+console.log('Dirección con checksum:', checksumAddress);
+
+app.post('/sensor', async (req, res) => {
     const { sensorId, siteId, value, timestamp } = req.body.data;
     console.log(sensorId, siteId, value, timestamp);
 
-    if(!sensorId || !siteId || !value || !timestamp) {
-        return res.status(400).json({ error: 'Please provide all values.'});
+    if (!sensorId || !siteId || !value || !timestamp) {
+        return res.status(400).json({ error: 'Please provide all values.' });
     }
 
     try {
@@ -29,38 +32,39 @@ app.post('/sensor' , async (req, res) => {
             WATER_MANAGEMENT_ABI,
             WATER_MANAGEMENT_CONTRACT_ADDRESS
         );
-        const nonce = await web3.getTransactionCount(PUBLIC_KEY, 'latest');
-        const gasEstimate = await waterContract.methods.pushData(sensorId, siteId, value, timestamp).estimateGas({ from: PRIVATE_KEY});
 
+        // Obtener el nonce de la cuenta pública
+        const nonce = await web3.eth.getTransactionCount(checksumAddress, 'pending');
+
+        // Estimar el gas necesario para la transacción
+        const gasEstimate = await waterContract.methods.pushData(sensorId, siteId, value, timestamp).estimateGas({ from: checksumAddress });
+
+        // Construir la transacción
         const tx = {
-            from: PUBLIC_KEY,
+            from: checksumAddress,
             to: WATER_MANAGEMENT_CONTRACT_ADDRESS,
             nonce: nonce,
             gas: gasEstimate,
-            data: waterContract.methods.pushData(sensorId, siteId,value, timestamp).encodeABI(),
-
+            data: waterContract.methods.pushData(sensorId, siteId, value, timestamp).encodeABI(),
         };
 
-        const signPromise = web3.eth.accounts.signTransaction(tx, PRIVATE_KEY);
-        signPromise.then((signedTx) => {
-            web3.eth.sendSignedTransaction(signedTx.rawTransaction,
-                function(err, hash) {
-                    if(!err) {
-                        console.log('The hash of this tx is: ', hash);
-                    } else {
-                        console.log('ERROR: ', err);
-                    }
-                }
-            );
-            res.json({success: true})
-        }).catch((err) => {
-            console.log('Promise failed: ', err);
-        })
+        // Firmar la transacción
+        const signedTx = await web3.eth.accounts.signTransaction(tx, PRIVATE_KEY);
+
+        // Enviar la transacción firmada
+        web3.eth.sendSignedTransaction(signedTx.rawTransaction, (err, hash) => {
+            if (!err) {
+                console.log('The hash of this tx is: ', hash);
+                res.json({ success: true, hash: hash });
+            } else {
+                console.log('ERROR: ', err);
+                res.status(500).json({ error: 'Failed to send transaction', details: err.message });
+            }
+        });
 
     } catch (error) {
-        res.status(500).json({error: 'Failed to send tx ', details: error.message});
+        res.status(500).json({ error: 'Failed to send tx ', details: error.message });
     }
-
 });
 
 app.listen(5000, () => {
